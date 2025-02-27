@@ -69,15 +69,15 @@ while cap.isOpened():
                 # Assign actions based on finger and movement
                 if movement == "up":
                     if finger_id == INDEX_FINGER_TIP:
-                        print(f"🔼 {hand_side} Window Opening (Index Finger)")
+                        print(f"🔼 {hand_side} Window Opening ")
                     elif finger_id == MIDDLE_FINGER_TIP:
-                        print(f"🔼 {hand_side} Window Opening (Middle Finger)")
+                        print(f"🔼 {hand_side} Window Opening ")
 
                 elif movement == "down":
                     if finger_id == INDEX_FINGER_TIP:
-                        print(f"🔽 {hand_side} Window Closing (Index Finger)")
+                        print(f"🔽 {hand_side} Window Closing ")
                     elif finger_id == MIDDLE_FINGER_TIP:
-                        print(f"🔽 {hand_side} Window Closing (Middle Finger)")
+                        print(f"🔽 {hand_side} Window Closing ")
 
     # Display the frame
     cv2.imshow("Hand Gesture Window Control", frame)

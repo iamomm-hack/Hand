@@ -1,0 +1,110 @@
+import cv2
+import mediapipe as mp
+import numpy as np
+import requests
+import time
+import threading
+
+# ESP32 Server Address
+ESP_SERVER = "http://192.168.249.15"
+
+def set_servo_position(side, position):
+    servo_param = "servo1" if side == "Left" else "servo2"
+    url = f"{ESP_SERVER}/?{servo_param}={position}&"
+    threading.Thread(target=requests.get, args=(url,), daemon=True).start()
+
+# Initialize MediaPipe Hands
+mp_hands = mp.solutions.hands
+mp_draw = mp.solutions.drawing_utils
+hands = mp_hands.Hands(min_detection_confidence=0.7, min_tracking_confidence=0.7)
+
+# Webcam Initialization
+cap = cv2.VideoCapture(0)
+
+# Tracking Variables
+prev_y_position = {}
+prev_angle = {"Left": 90, "Right": 90}  # Start at 90 degrees
+last_update_time = {"Left": time.time(), "Right": time.time()}
+debounce_interval = 0.1  # 100ms debounce interval
+
+def detect_movement_direction(hand_id, curr_y):
+    global prev_y_position
+    direction = None
+    if hand_id in prev_y_position:
+        if curr_y < prev_y_position[hand_id] - 0.05:
+            direction = "up"
+        elif curr_y > prev_y_position[hand_id] + 0.05:
+            direction = "down"
+    prev_y_position[hand_id] = curr_y  # Update previous position
+    return direction
+
+def smooth_angle_change(current_angle, target_angle, step=3):
+    if current_angle < target_angle:
+        return min(target_angle, current_angle + step)
+    elif current_angle > target_angle:
+        return max(target_angle, current_angle - step)
+    return current_angle
+
+while cap.isOpened():
+    ret, frame = cap.read()
+    if not ret:
+        break
+    
+    frame = cv2.flip(frame, 1)
+    frame_width = frame.shape[1]
+    center_x = frame_width // 2
+    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    results = hands.process(frame_rgb)
+    
+    cv2.line(frame, (center_x, 0), (center_x, frame.shape[0]), (0, 255, 0), 2)
+    current_time = time.time()
+    
+    if results.multi_hand_landmarks:
+        for hand_id, hand_landmarks in enumerate(results.multi_hand_landmarks):
+            mp_draw.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+            
+            index_finger_tip_x = int(hand_landmarks.landmark[8].x * frame_width)
+            index_finger_tip_y = hand_landmarks.landmark[8].y
+            hand_side = "Left" if index_finger_tip_x < center_x else "Right"
+            
+            if current_time - last_update_time[hand_side] < debounce_interval:
+                continue
+            last_update_time[hand_side] = current_time
+            
+            movement = detect_movement_direction(hand_id, index_finger_tip_y)
+            if movement == "up":
+                print(f"🔼 {hand_side} Window Opening")
+            elif movement == "down":
+                print(f"🔽 {hand_side} Window Closing")
+            
+            # Detect Open Hand or Fist
+            thumb_tip, index_tip, middle_tip, ring_tip, pinky_tip = (
+                hand_landmarks.landmark[i].y for i in [4, 8, 12, 16, 20]
+            )
+            palm_base = hand_landmarks.landmark[0].y
+            extended_fingers = sum(tip < palm_base for tip in [thumb_tip, index_tip, middle_tip, ring_tip, pinky_tip])
+            
+            is_open_hand = extended_fingers >= 4
+            is_fist = extended_fingers == 0
+            
+            target_angle = prev_angle[hand_side]
+            if is_open_hand:
+                target_angle = min(180, prev_angle[hand_side] + 5)
+                print(f"{hand_side} Hand Open - Increasing Angle: {target_angle}")
+            elif is_fist:
+                target_angle = max(0, prev_angle[hand_side] - 5)
+                print(f"{hand_side} Hand Fist - Decreasing Angle: {target_angle}")
+            else:
+                continue
+            
+            smoothed_angle = smooth_angle_change(prev_angle[hand_side], target_angle)
+            if smoothed_angle != prev_angle[hand_side]:
+                prev_angle[hand_side] = smoothed_angle
+                set_servo_position(hand_side, smoothed_angle)
+    
+    cv2.imshow("Hand Gesture Window Control", frame)
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+cap.release()
+cv2.destroyAllWindows()
